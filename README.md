@@ -8,5 +8,9 @@ This technique specifically accelerates P2P interactions on the GPU through redu
 The basic implementation is referred to as "Indexing," which represents a straightforward GPU approach, while the enhanced version is called "Redundant," which involves duplicating data in global memory for threads. 
 Since PhotoNs employs a dual buffering technique to overlap tree walks with computations, there are two variations of both the indexing and redundant methods: one that utilizes dual buffering and another that executes tree walks and computations serially for clearer analytical modeling.
 
+
+## License
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
 # Attribution
 Don't use this code in your work.
