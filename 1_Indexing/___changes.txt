@@ -1,0 +1,9 @@
+[1] in fmm.c:fmm_prepare after calling build_localtree() i added call to new function initGPUarrays(): int this function gpu related arrays are initialized only once and leaf_data,particle_data are recollected since they change after each iteration.
+[2] in fmm.c:walk_task_p2p: edited, it traverses all tree leafs without calling turn2compute_p2p()
+[3] in fmm.c:turn2compute_p2p: executes only onces after walk_task_p2p finished, so task_prepare_p2p() was also edited and turn2compute_p2p() was called after walk_task_p2p() and also in fmm_task() when task_compute_p2p() is called to calculate remained tasks, were commented.
+[4] in fmm.c:fmm_task: LEN_TASK set to NLEAF*maxNeighbors
+[5] in remote.c: walk_task_p2p_ext() changed like fmm.c:walk_task_p2p(), and task_prepare_p2p_ext() like task_prepare_p2p(), 
+[6] in photoNs.c:driver(): i added some printf and calculation of macPartsInLeaf or ...
+[7] in Makefile:make_demo: i added a parameter with value 1 to let printfs work and details print
+
+
