@@ -12,16 +12,15 @@ void LogMessage(int loop, double a, double time_short, double time_pm, double ti
 			exit(0);
 		}
 
-		fprintf(flog, "%5d %3d  %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %F %d %d\n", 
+		fprintf(flog, "%5d %3d  %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %F \n", 
 				loop_step /*##n*/, adaptive_level_maximum /*lvm*/,  
 				imbalance, a/*a_t*/, time_pm/*dtpm*/, time_short /*dtshort*/, 
-				dtime_p2p_self, //p2p interactions with local tree 
-				dtime_p2p, //p2p interaction with remote tree
+				dtime_p2p_self, //p2p self interactions 
+				dtime_p2p, //p2p interaction with other boxes
 				dtime_p2p_collect, //p2p data collection time 
-				dtime_p2p_transfer, //time to copy data to GPU and copy back to RAM
-				dtime_p2p_update, //time to update acc of particles
-				dtime_m2l, dtime_fmm, dtime_fmm_remote /*dtext*/ , time_total,
-				num_walkP2P, num_walkP2P_ext );
+				dtime_p2p_transfer,
+				dtime_p2p_update,
+				dtime_m2l, dtime_fmm, dtime_fmm_remote /*dtext*/ , time_total );
 		//    fprintf(flog, "\n");
 	}
 }
@@ -42,7 +41,7 @@ void initializeLogfile() {
 			printf(" error log files!\n");
 			exit(0);
 		}
-		fprintf(flog, "###n,lvl,imbalance a_t,dTpm,dTshort,p2p_self,p2p_others,p2p_collect,p2p_update,p2p_transfer,dTm2l,dTfmm,dText,Ttot \n");
+		fprintf(flog, "###n,lvl,imbalance a_t,dTpm,dTshort,p2p_self,p2p_others,p2p_collect,p2p_transfer,p2p_update,dTm2l,dTfmm,dText,Ttot \n");
 
 	}
 }

@@ -9,7 +9,6 @@
 #include <string.h> 
 #include "../inc/photoNs.h"
 #include "../inc/remotes.h"
-#include "../inc/fmm.h"
 #include "../inc/photoNs_CUDA.cuh"
 #include "/usr/local/cuda/include/cuda_runtime.h"
 //using namespace std;
@@ -37,6 +36,7 @@ int argt_ex [2];
 
 //reads task queue (interactions queue) and calls p2p kernel
 
+int cudaState = 0;// state of cuda executions
 void *task_compute_p2p_ext(void *argt_ex ) {
 	int n;
 	int *par = (int*)argt_ex ;
@@ -45,69 +45,116 @@ void *task_compute_p2p_ext(void *argt_ex ) {
 	cudaState = 0;
 
 	numRemoteInteractions += nt;
-	printf("<%d>",nt);
+	//printf("<%d>",nt);
 
+	if(verbosity_gpu) printf(">> \texecuting a group of %d tasks on GPU...\n", nt);
+
+	//data collection
+	if(verbosity_gpu) printf(">> \tdata collection...\n");
 	double t0 = dtime();
-	if(verbosity_gpu) printf(">> \tneighbor-interaction data collection...\n");
-	int loffset, poffset;
-	for(int i = first_leaf; i < last_leaf; i++)
+	int posCounter = 0;
+	int partCounter = 0;
+	for (n=0; n<nt; n++) 
 	{
-		loffset = (i - first_leaf) * leafChunk;
-		leaf_data[loffset + 0] = leaf[i].npart;
-		leaf_data[loffset + 1] = leaf[i].ipart;
+		//if(verbosity_gpu) printf("\r>> \t\tPROC_RANK %d : reading task %d...\n", PROC_RANK, n);
+		int im = task_t_ex[c][n];
+		int jm = task_s_ex[c][n];
 
-		poffset = (i - first_leaf) * particleChunk;
-		for(int j = 0; j < leaf[i].npart; j++)
+		int jstart = exrtree[jm].son[0];
+		int jend   = exrtree[jm].son[0] + exrtree[jm].npart;
+		
+		//store indices
+		h_pos_index[0][n*5 + 0] = posCounter; //start index of data for this parital interaction
+		h_pos_index[0][n*5 + 1] = im; //im - first_leaf; //target leaf
+		h_pos_index[0][n*5 + 2] = leaf[im].npart; //num target particles
+		h_pos_index[0][n*5 + 3] = exrtree[jm].npart; //num source particles
+		//h_pos_index[PROC_RANK][n*5 + 4] = partCounter; //start index of results for this leaf
+		h_pos_index[0][n*5 + 4] = n * maxPartsInLeaf * 3;
+		//partCounter += (leaf[im].npart * 3);
+		
+		if(leaf[im].npart <= 0 || exrtree[jm].npart <= 0)
 		{
-			particle_data[poffset + j * 3 + 0] = part[leaf[i].ipart + j].pos[0];
-			particle_data[poffset + j * 3 + 1] = part[leaf[i].ipart + j].pos[1];
-			particle_data[poffset + j * 3 + 2] = part[leaf[i].ipart + j].pos[2];
+			h_pos_index[0][n*5 + 2] = 0;
+			h_pos_index[0][n*5 + 3] = 0;
+			continue;
+		}
+		//partCounter += (leaf[im].npart * 3);
+		
+		//collect targets
+		for (int ip=leaf[im].ipart; ip<leaf[im].ipart+leaf[im].npart; ip++)
+		{
+			h_pos_data[0][posCounter++] = part[ip].pos[0];
+			h_pos_data[0][posCounter++] = part[ip].pos[1];
+			h_pos_data[0][posCounter++] = part[ip].pos[2];
+		}
+
+		//collect sources
+		for (int jp=jstart; jp<jend; jp++)
+		{
+			h_pos_data[0][posCounter++] = exrbody[jp].pos[0];
+			h_pos_data[0][posCounter++] = exrbody[jp].pos[1];
+			h_pos_data[0][posCounter++] = exrbody[jp].pos[2];
 		}
 	}
-	if(verbosity_gpu) printf(">> \tneighbor-interaction collect interactions...\n");
-	for (int n=0; n<nt; n++)
-	{
-		interactions_data[n * 2 + 0] = task_t_ex[c][n] - first_leaf;
-		interactions_data[n * 2 + 1] = task_s_ex[c][n] - first_leaf;
-	}
-	if(verbosity_gpu) printf(">> \tneighbor-interaction data collection finished.\n");
 	dtime_p2p_collect += dtime() - t0;
-
-	t0 = dtime();
-	if(verbosity_gpu) printf(">> \tneighbor-interaction GPU data allocation...\n");
-	initGPU(verbosity_gpu);
-	cudaState = allocMemGPU(NLEAF, maxPartsInLeaf, maxNeighbors, LEN_TASK_REMOTE, verbosity_gpu);
-	if(verbosity_gpu) printf(">> \tneighbor-interaction copy GPU data...\n");
-	copyMemGPU(particle_data, leaf_data, interactions_data, nt, verbosity_gpu);
-	dtime_p2p_transfer += dtime() - t0;
-
-	t0 = dtime();
-	if(verbosity_gpu) printf(">> \tneighbor-interaction call kernel...\n");
-	cudaState = LaunchKernelP2PIndexing(nt, particleChunk, leafChunk, resultChunk, SoftenScale, MASSPART, verbosity_gpu);
-	dtime_p2p += dtime() - t0;
 	
+	//data preparation
 	t0 = dtime();
-	if(verbosity_gpu) printf(">> \tneighbor-interaction read results...\n");
-	readResultsGPU(result_data, nt, maxPartsInLeaf, verbosity_gpu);
+	//if(PROC_RANK == 0)
+	//{
+		if(verbosity_gpu) printf(">> \tinitializing GPU...\n");
+		initGPU(verbosity_gpu);
+		if(verbosity_gpu) printf(">> \tallocating memory in GPU...\n");
+		cudaState = allocMemGPU(PROC_SIZE, maxPartsInLeaf, LEN_TASK_REMOTE, verbosity_gpu);
+		//if(cudaState < 0) return;
+	//}
+	//copy data
+	if(verbosity_gpu) printf(">> \tcopy mem GPU...\n");
+	cudaState = copyMemGPU(h_pos_data, h_pos_index,
+						//PROC_SIZE, PROC_RANK,
+						4, 0,
+						maxPartsInLeaf, nt, posCounter, 
+						verbosity_gpu);
+	//if(cudaState < 0) return;
+	//
 	dtime_p2p_transfer += dtime() - t0;
 
+	//call kernel
 	t0 = dtime();
-	if(verbosity_gpu) printf(">> \tneighbor-interaction update tree...\n");
-	int resultOffset, leafId;
-	for(int i = 0; i < nt; i++)
-	{
-		leafId = interactions_data[i * 2] + first_leaf;
-		resultOffset = i * resultChunk;
-		for(int ip = 0; ip < leaf[leafId].npart; ip++)
-		{
-			part[leaf[leafId].ipart+ip].acc[0] += result_data[resultOffset++];
-			part[leaf[leafId].ipart+ip].acc[1] += result_data[resultOffset++];
-			part[leaf[leafId].ipart+ip].acc[2] += result_data[resultOffset++];
+	if(verbosity_gpu) printf(">> \tlaunching kernel...\n");
+	//cudaState = LaunchKernelP2PDualNaive(PROC_SIZE, PROC_RANK, nt, SoftenScale, masspart, verbosity_gpu);
+	cudaState = LaunchKernelP2PDualNaive(4, 0, nt, SoftenScale, masspart, verbosity_gpu);
+	//if(cudaState < 0) return;
+	dtime_p2p += dtime() - t0;
 
-			//printf("one acc data = %f ", part[leaf[leafId].ipart+ip].acc[0]);
+	//read results
+	t0 = dtime();
+	if(verbosity_gpu) printf(">> \treading results...\n");
+	//readResultsGPU(h_acc_data, PROC_RANK, PROC_SIZE, maxPartsInLeaf, LEN_TASK_REMOTE, partCounter, verbosity_gpu);
+	readResultsGPU(h_acc_data, 0, 4, maxPartsInLeaf, LEN_TASK_REMOTE, partCounter, verbosity_gpu);
+	dtime_p2p_transfer += dtime() - t0;
+	
+	//update tree
+	t0 = dtime();
+	int partOffset = 0;
+	for(int n = 0; n < nt; n++)
+	{
+		//int im = task_t_ex[c][n];
+		int im = h_pos_index[0][n*5 + 1]; 
+		//if(leaf[im].npart <= 0)
+		if(h_pos_index[0][n*5 + 2] == 0 || h_pos_index[0][n*5 + 3] == 0)
+			continue;
+		partOffset = n * maxPartsInLeaf * 3;
+		partCounter = 0;
+		for (int ip=leaf[im].ipart; ip<leaf[im].ipart+leaf[im].npart; ip++)
+		{
+			part[ip].acc[0] = h_acc_data[0][partOffset + partCounter * 3 + 0];
+			part[ip].acc[1] = h_acc_data[0][partOffset + partCounter * 3 + 1];
+			part[ip].acc[2] = h_acc_data[0][partOffset + partCounter * 3 + 2];
+			partCounter++;
 		}
 	}
-	if(verbosity_gpu) printf(">> \tneighbor-interaction finished\n");
+	if(verbosity_gpu) printf(">> \treading results done.\n");
 	dtime_p2p_update += dtime() - t0;
 }
 
@@ -120,21 +167,21 @@ void turn2compute_p2p_ext(){
 	// 	pthread_join(tid_ex , &status_ex );
 	// 	//cuda device synchronize
 	// }
-	
+
 	ntask_ex[alt_ex] = idxtask_ex;
 	argt_ex[0] = alt_ex ; // ?
 	argt_ex[1] = ntask_ex[alt_ex ]; //n tasks
-
+	
 	//pthread_create(&tid_ex , NULL, task_compute_p2p_ext, (void*)argt_ex );
 	task_compute_p2p_ext((void*)argt_ex);
-	
+
 	alt_ex  = (alt_ex +1)%2;
 	ts_ex  = task_s_ex[alt_ex ];
 	tt_ex  = task_t_ex[alt_ex ];
 
 	idxtask_ex = 0;
 
-	numRemoteCalls++;
+	numQueueFlush++;
 }
 
 //collects target leafs with its source leafs, and inserts them to presortedArray vector
@@ -143,8 +190,6 @@ void walk_task_p2p_ext(int im, int jm)
 	double dx, dy, dz, r2, dr, wi, wj;
 	double dist[3];
 
-	//if(verbosity_gpu) printf("walk_task_p2p_ext called...");
-	
 	if ( im < first_leaf ) {
 		printf(" error1 \n");
 		exit(0);
@@ -171,8 +216,6 @@ void walk_task_p2p_ext(int im, int jm)
 		if ( idxtask_ex == LEN_TASK_REMOTE ) {
 			turn2compute_p2p_ext();
 		}
-
-		// if(verbosity_gpu) printf("a task collected...");
 
 		return;
 	}
@@ -317,7 +360,7 @@ void walk_task_p2p_ext(int im, int jm)
 }
 
 //calls tree walk function
-void task_prepare_p2p_ext() {
+int task_prepare_p2p_ext() {
 	alt_ex  = 0;
 	p1st_ex = 1;
 	idxtask_ex = 0;
@@ -326,12 +369,14 @@ void task_prepare_p2p_ext() {
 	tt_ex  = task_t_ex[alt_ex];
 
 	if(verbosity_gpu) printf(">> \tbegin tree walk ...\n");
+	//double prep2p = dtime_p2p;
+	//double t1 = dtime();
 	walk_task_p2p_ext(first_node, 0);
+	//dtime_p2p_collect += (dtime() - t1 - (dtime_p2p - prep2p));
 	if(verbosity_gpu) printf(">> \tbegin turn2compute_p2p_ext ...\n");
 	turn2compute_p2p_ext();
 
-	num_walkP2P_ext ++;
-	//return cudaState;
+	return cudaState;
 }
 
 void prepare_sendtree2(int isend, int ilocal, int tNode, int D, double displace[3])
@@ -667,11 +712,11 @@ void *task_compute_m2l_ext(void *argt_ex ) {
 }
 
 int arraysAllocated = 0;
-void fmm_remote_task(int numrecv) {
+int fmm_remote_task(int numrecv) {
 	int n;
 	double t1  = dtime();
-	//LEN_TASK_REMOTE = 100000;
-	LEN_TASK_REMOTE = NLEAF * maxNeighbors;
+	// int maxNeighbors = 1000;
+	LEN_TASK_REMOTE = 1000000;//LEN_TASK_REMOTE = NLEAF * maxNeighbors;// 
 
 	//if(! arraysAllocated)
 	//{
@@ -687,16 +732,16 @@ void fmm_remote_task(int numrecv) {
 	//traverse tree and compute p2p
 	if(verbosity_gpu)
 	printf(">> \tfmm remote begin...\n");
-	task_prepare_p2p_ext();
-	if(cudaState == -2)
+	int state = task_prepare_p2p_ext();
+	if(state == -2)
 	{
 		printf("ERROR: execution failed due to GPU errors\n");
-		return;
+		return state;
 	}
-
-	if (p1st_ex != 1) {
-		pthread_join(tid_ex , &status_ex );
-	}
+	
+	// if (p1st_ex != 1) {
+	// 	pthread_join(tid_ex , &status_ex );
+	// }
 	ntask_ex[alt_ex ] = idxtask_ex;
 	if(verbosity_gpu)
 	printf(">> \tfmm remote allmost done...\n");
@@ -735,9 +780,11 @@ void fmm_remote_task(int numrecv) {
 		pfree(task_s_ex[1], 83);
 	if (NULL != task_t_ex[1])
 		pfree(task_t_ex[1], 84);
+
+	return 0;
 }
 
-void fmm_remote(int idx, double displace[3])
+int fmm_remote(int idx, double displace[3])
 {
 	int srank, d, rrank;
 	int n, mi, mj, mk;
@@ -789,7 +836,7 @@ void fmm_remote(int idx, double displace[3])
 
 
 	if ( 0 == recvnumbody && 0 == recvnumnode)
-		return; //return -1;
+		return -1;
 
 	MPI_Isend(exstree, sendnumnode, strReNode, srank, 111, MPI_COMM_WORLD, &request);
 	MPI_Recv( exrtree, recvnumnode, strReNode, rrank, 111, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -802,8 +849,9 @@ void fmm_remote(int idx, double displace[3])
     if(verbosity_gpu) 
 	printf(">> \trunning fmm_remote_task\n");
 	int state = 0;
-	fmm_remote_task ( recvnumnode );
+	state = fmm_remote_task ( recvnumnode );
 	if(verbosity_gpu) 
 	printf(">> \tfmm_remote_task done.\n");
+	return state;
 	//	walk_m2l_remote2(first_node, 0);
 }

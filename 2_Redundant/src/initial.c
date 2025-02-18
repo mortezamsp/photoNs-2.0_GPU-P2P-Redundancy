@@ -170,12 +170,11 @@ void readin_parameter_file(char parameterfile[])
 				vproc[1] = atoi(value);
 			}
 			else if ( 0 == strcmp(pname, "MaxPackage") ) {
-				MAXLEAF = 16;//atoi(value);
-				//its default value is 8 and a loop takes 1.25 second to execute
-				//i changed it manually to 4, each loop takes 1.6 seconds
-				//for 2, it takes 2.7 seconds
-				//for 16, it takes 1.3 seconds
-				//for 32, it takes 1.43 seconds
+				MAXLEAF = atoi(value);
+				//its default value is 8 and a loop takes 1 second to execute
+				//i changed it manuallt to 2, each loop takes 3 seconds
+				//for 4, it takes 1.17 seconds
+				//then to 32, it crashed becuase of fixed data arrays 
 			}
 			else if ( 0 == strcmp(pname, "SnapNumber") ) {
 				SnapNumber = atoi(value);

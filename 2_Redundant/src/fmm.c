@@ -178,9 +178,9 @@ void build_localtree() {
 	dtime_p2p = 0.0;
 	dtime_p2p_self = 0;
 	dtime_p2p_collect = 0.0;
+	dtime_p2p_remote = 0.0;
 	dtime_p2p_transfer = 0.0;
 	dtime_p2p_update = 0.0;
-	dtime_p2p_remote = 0.0;
 	dtime_p2p_mirror = 0.0;
 
 	dtime_p2p_adlc = 0.0;
@@ -234,6 +234,7 @@ void build_localtree() {
 			btree[n].L[m] = 0.0;
 		}
 	}
+
 
 	for (n=0; n<NLEAF; n++) {
 		leaf[n].npart = 0;
@@ -359,7 +360,6 @@ void fmm_construct( ) {
 }
 
 ////////////////////////////////////////////////////////////////
-
 ///// need stort im, jm and for m2l or p2p list.
 
 int p1st = 1;
@@ -374,23 +374,21 @@ void *status;
 
 void *task_compute_p2p(void *arg);
 
-//now, it executes only once
 void turn2compute_p2p(){
-	if (p1st == 1) {
-		p1st = 0;
-	} 
-	else {
-		pthread_join(tid, &status);
-	}
+	// if (p1st == 1) {
+	// 	p1st = 0;
+	// } 
+	// else {
+	// 	pthread_join(tid, &status);
+	// }
 	ntask[alt] = idxtask;
 
 	argt[0] = alt;
 	argt[1] = ntask[alt];
-
-	pthread_create(&tid, NULL, task_compute_p2p, (void*)argt);
+	// pthread_create(&tid, NULL, task_compute_p2p, (void*)argt);
+	task_compute_p2p((void*)argt);
 
 	alt = (alt+1)%2;
-
 	ts = task_s[alt];
 	tt = task_t[alt];
 
@@ -415,9 +413,9 @@ void walk_task_p2p(int im, int jm)
 			*(tt + idxtask) = im;
 			idxtask ++;
 
-			// if ( idxtask == LEN_TASK ) {
-			// 	turn2compute_p2p();
-			// }
+			if ( idxtask == LEN_TASK ) {
+				turn2compute_p2p();
+			}
 		}
 		if ( im >= first_node ) {
 			walk_task_p2p(btree[im].son[0], btree[jm].son[0]);
@@ -435,11 +433,11 @@ void walk_task_p2p(int im, int jm)
 		*(tt + idxtask) = im;
 		idxtask ++;
 
-		// if ( idxtask == LEN_TASK ) {
+		if ( idxtask == LEN_TASK ) {
 
-		// 	turn2compute_p2p();
+			turn2compute_p2p();
 
-		// }
+		}
 		return;
 	}
 
@@ -533,6 +531,7 @@ void walk_task_p2p(int im, int jm)
 	}
 }
 
+
 void *task_compute_m2l(void *arg);
 
 void turn2compute_m2l(){
@@ -558,6 +557,8 @@ void turn2compute_m2l(){
 	idxtask = 0;
 
 }
+
+
 
 void walk_task_m2l(int im, int jm)
 {
@@ -704,43 +705,10 @@ void walk_task_m2l(int im, int jm)
 	}
 }
 
+
 static double dTlocal, dTremote, dTmirror;
 static INT64 NTASKP2P;
 static INT64 NTASKM2L;
-
-int arraysInitialized = 0;
-void initGPUarrays()
-{
-	double t0 = dtime();
-	if(!arraysInitialized)
-	{
-		int upperBound = 2;
-		if(verbosity_gpu) printf(">> \tself-interaction allocating memory...\n");
-		if(verbosity_gpu) printf(">> \tNLEAF%d,maxPartsInLeaf%d,maxNeighbors%d\n",
-									 NLEAF,maxPartsInLeaf,maxNeighbors);
-		leafChunk = 2; //1 number of particles, start index of particles
-		leafSize = NLEAF * leafChunk * upperBound;
-		if(verbosity_gpu) printf(">> \t\tleafSize = %d\n", leafSize);
-		resultChunk = maxPartsInLeaf * 3;
-		resultSize = LEN_TASK * resultChunk * upperBound; //results are duplicated first, and i must integrate it in CPU after kernel called
-		if(verbosity_gpu) printf(">> \t\tresultSize = %d\n", resultSize);
-		particleChunk = maxPartsInLeaf * 3;
-		particleSize = NLEAF * particleChunk * upperBound; 
-		if(verbosity_gpu) printf(">> \t\tparticleSize = %d\n", particleSize);
-		interactionChunk = maxNeighbors * 2;
-		interactionSize = NLEAF * interactionChunk * upperBound;
-		if(verbosity_gpu) printf(">> \t\tinteractionSize = %d\n", interactionSize);
-		int totalSize = (resultSize+particleSize)*sizeof(double)+(leafSize+interactionSize)*sizeof(int);
-		if(verbosity_gpu) printf(">> \trequesting fot atmost %1.lf MB extra memory...\n", (double)totalSize/1024.0/1024.0);
-		if(leaf_data == NULL) leaf_data = (int*)malloc(leafSize * sizeof(int));
-		if(result_data == NULL) result_data = (double*)malloc(resultSize * sizeof(double));
-		if(particle_data == NULL) particle_data = (double*)malloc(particleSize * sizeof(double));
-		if(interactions_data == NULL) interactions_data = (int*)malloc(interactionSize * sizeof(int));
-	
-		arraysInitialized = 1;
-	}
-	dtime_p2p_collect += dtime() - t0;
-}
 
 void fmm_prepare() 
 {
@@ -763,21 +731,6 @@ void fmm_prepare()
 	}
 
 	build_localtree();
-
-	maxPartsInLeaf = 0;
-	for(int i = first_leaf; i < last_leaf; i++)
-		maxPartsInLeaf = maxPartsInLeaf > leaf[i].npart ? maxPartsInLeaf : leaf[i].npart;
-	/*
-	// 0...NPART, fist_leaf...last_leaf, first_node...last_node
-	*/
-	int nleafs = last_leaf - first_leaf;
-	maxNeighbors = 1000;
-	LEN_TASK = nleafs * maxNeighbors; //16384;
-	int minParts = 0, maxParts = maxPartsInLeaf; // i dont want to waist time for calculating them
-	if(verbosity_gpu) printf(">> \tleafs :  num leafs = %d, max tasks = %d, num particles = %ld, [min,avg,max] particle/leaf = [%d,%d,%d]\n",
-			nleafs, LEN_TASK, NPART_TOTAL, minParts, (int)ceil((double)NPART_TOTAL / nleafs), maxParts);
-
-	initGPUarrays();
 
 	for (n=first_leaf; n<last_leaf; n++)
 		p2m(leaf[n].ipart, leaf[n].npart, leaf[n].center, leaf[n].M);
@@ -818,15 +771,9 @@ void task_prepare_p2p() {
 	ts = task_s[alt];
 	tt = task_t[alt];
 
-	if(verbosity_gpu) printf(">> \twalk_task_p2p ...\n");
 	walk_task_p2p(first_node, first_node);
-	if(verbosity_gpu) printf(">> \tturn2compute_p2p ...\n");
-	turn2compute_p2p();
-	if(verbosity_gpu) printf(">> \ttask_prepare_p2p finished.\n");
-
-	num_walkP2P ++;
-	//return cudaState;
 }
+
 
 void task_prepare_m2l() {
 	alt = 0;
@@ -839,76 +786,100 @@ void task_prepare_m2l() {
 	walk_task_m2l(first_node, first_node);
 }
 
+
 void *task_compute_p2p(void *argt) {
-	int *par = argt;
+	int n;
+	int *par = (int*)argt;
 	int c = par[0];
 	int nt =  par[1];
-	cudaState = 0;
 
+	double rs = splitRadius;
+
+	double coeff = 2.0/sqrt(M_PI);
+
+	//data collection
 	double t0 = dtime();
-	if(verbosity_gpu) printf(">> \tself-interaction data collection...\n");
-	int loffset, poffset;
-	for(int i = first_leaf; i < last_leaf; i++)
+	if(verbosity_gpu) 
+	printf(">> \tself-interactions ...\n");
+	//double t0 = dtime();
+	if(verbosity_gpu) printf(">> \t\t data collection\n");
+	const int MaxParticlesInLeaf = 8;
+	int part_data_chunk = MaxParticlesInLeaf*2*3;
+	if(part_data == NULL) part_data = (double*)malloc(nt*part_data_chunk*sizeof(double)); //each task has source and target particles, each particle has 3 position
+	if(part_idx == NULL) part_idx = (int*)malloc(nt*3*sizeof(int)); //task indices {im.npart, jm.npart, }
+	int result_chunk = MaxParticlesInLeaf*3;
+	if(result == NULL) result = (double*)malloc(nt*result_chunk*sizeof(double));
+	for (n=0; n<nt; n++) 
 	{
-		loffset = (i - first_leaf) * leafChunk;
-		leaf_data[loffset + 0] = leaf[i].npart;
-		leaf_data[loffset + 1] = leaf[i].ipart;
+		int inode = task_t[c][n];
+		int jnode = task_s[c][n];
 
-		poffset = (i - first_leaf) * particleChunk;
-		for(int j = 0; j < leaf[i].npart; j++)
+		part_idx[n*3 + 0] = leaf[inode].npart;
+		part_idx[n*3 + 1] = leaf[jnode].npart;
+		part_idx[n*3 + 2] = inode; //keep parent (leaf) id
+
+		int p = n*part_data_chunk;
+		for (int q=0; q<leaf[inode].npart; q++)
 		{
-			particle_data[poffset + j * 3 + 0] = part[leaf[i].ipart + j].pos[0];
-			particle_data[poffset + j * 3 + 1] = part[leaf[i].ipart + j].pos[1];
-			particle_data[poffset + j * 3 + 2] = part[leaf[i].ipart + j].pos[2];
+			int ip = leaf[inode].ipart + q;
+			part_data[p+q*3 + 0] = part[ip].pos[0];
+			part_data[p+q*3 + 1] = part[ip].pos[1];
+			part_data[p+q*3 + 2] = part[ip].pos[2];
+		}
+		int q = leaf[inode].npart * 3;
+		for (int jp=leaf[jnode].ipart; jp<leaf[jnode].ipart+leaf[jnode].npart; jp++)
+		{
+			//if (jp == ip) //must be considered in kernel
+			//	continue;
+			part_data[p+q+jp*3 + 0] = part[jp].pos[0];
+			part_data[p+q+jp*3 + 1] = part[jp].pos[1];
+			part_data[p+q+jp*3 + 2] = part[jp].pos[2];
 		}
 	}
-	if(verbosity_gpu) printf(">> \tself-interaction data collection finished.\n");
-	if(verbosity_gpu) printf(">> \tself-interaction GPU data allocation...\n");
 	dtime_p2p_collect += dtime() - t0;
 
+	//copy data to gpu
 	t0 = dtime();
-	initGPU(verbosity_gpu);
-	cudaState = allocMemGPU(NLEAF, maxPartsInLeaf, maxNeighbors, LEN_TASK, verbosity_gpu);
-	if(verbosity_gpu) printf(">> \tself-interaction collect interactions...\n");
-	for (int n=0; n<nt; n++)
+	if(verbosity_gpu) printf(">> \t\tself-interactions PGU preparation\n");
+	initGPU(0);
+	int state = allocAndCopySelfInteractionsGPU(part_data, part_idx, part_data_chunk, 3, result_chunk, nt);
+	if(state < 0)
 	{
-		interactions_data[n * 2 + 0] = task_t[c][n] - first_leaf;
-		interactions_data[n * 2 + 1] = task_s[c][n] - first_leaf;
+		printf("ERROR in data collection GPU for self interactions\n");
+		//return;
 	}
-	if(verbosity_gpu) printf(">> \tself-interaction copy GPU data...\n");
-	copyMemGPU(particle_data, leaf_data, interactions_data, nt, verbosity_gpu);
 	dtime_p2p_transfer += dtime() - t0;
 
+	//cuda kernel
 	t0 = dtime();
-	if(verbosity_gpu) printf(">> \tself-interaction call kernel...\n");
-	cudaState = LaunchKernelP2PIndexing(nt, particleChunk, leafChunk, resultChunk, SoftenScale, MASSPART, verbosity_gpu);
+	if(verbosity_gpu) printf(">> \t\tself-interactions kernel execution\n");
+	LaunchKernelP2PSelfInteractions(nt, part_data_chunk, 3, result_chunk, SoftenScale, MASSPART);
 	dtime_p2p_self += dtime() - t0;
 	
+	//read results
 	t0 = dtime();
-	if(verbosity_gpu) printf(">> \tself-interaction read results...\n");
-	readResultsGPU(result_data, nt, maxPartsInLeaf, verbosity_gpu);
+	if(verbosity_gpu) printf(">> \t\tself-interactions reading results\n");
+	readResultsGPUSelfInteractions(result, result_chunk, nt);
 	dtime_p2p_transfer += dtime() - t0;
-
-	if(verbosity_gpu) printf(">> \tself-interaction update tree...\n");
+	
+	if(verbosity_gpu) printf(">> \t\tself-interactions update tree\n");
 	t0 = dtime();
-	int resultOffset, leafId;
 	for(int i = 0; i < nt; i++)
 	{
-		//if(verbosity_gpu) printf(">> \t\treading leaf result [%d/%d]...\n", i, nt);
-		leafId = interactions_data[i * 2] + first_leaf;
-		resultOffset = i * resultChunk;
-		for(int ip = 0; ip < leaf[leafId].npart; ip++)
+		int leafId = part_idx[i * 3 + 2];
+		int numTargets = part_idx[i * 3 + 0];
+		for(int j = 0; j < numTargets; j++)
 		{
-			part[leaf[leafId].ipart+ip].acc[0] += result_data[resultOffset++];
-			part[leaf[leafId].ipart+ip].acc[1] += result_data[resultOffset++];
-			part[leaf[leafId].ipart+ip].acc[2] += result_data[resultOffset++];
-
-			//printf("one acc data = %f ", part[leaf[leafId].ipart+ip].acc[0]);
+			part[leaf[leafId].ipart+j].acc[0] += result[i*3 + 0];
+			part[leaf[leafId].ipart+j].acc[1] += result[i*3 + 1];
+			part[leaf[leafId].ipart+j].acc[2] += result[i*3 + 2];
 		}
 	}
-	if(verbosity_gpu) printf(">> \tself-interaction finished\n");
 	dtime_p2p_update += dtime() - t0;
+	if(verbosity_gpu) 
+	printf(">> \t\tself-interactions finished.\n");
 }
+
 
 void *task_compute_m2l(void *argt) {
 	int n;
@@ -947,43 +918,46 @@ void *task_compute_m2l(void *argt) {
 void fmm_task() {
 	int n;
 	double t1  = dtime();
-	LEN_TASK = NLEAF * maxNeighbors; //16384;
+	LEN_TASK = 16384;
 
+	if(verbosity_gpu) printf(">> \tP2P self interaction defining tree task arrays ...\n");
 	task_s[0] = (int*)pmalloc(sizeof(int)*LEN_TASK,71);
 	task_t[0] = (int*)pmalloc(sizeof(int)*LEN_TASK,72);
 
+	if(verbosity_gpu) printf(">> \tP2P self interaction defining tree task arrays ...\n");
 	task_s[1] = (int*)pmalloc(sizeof(int)*LEN_TASK,73);
 	task_t[1] = (int*)pmalloc(sizeof(int)*LEN_TASK,74);
-
+	
+	if(verbosity_gpu) printf(">> \tP2P self interaction defining tree task arrays ...\n");
 	task_accx[0] = (double*)pmalloc(sizeof(double)*LEN_TASK*MAXLEAF, 75);
 	task_accy[0] = (double*)pmalloc(sizeof(double)*LEN_TASK*MAXLEAF, 76);
 	task_accz[0] = (double*)pmalloc(sizeof(double)*LEN_TASK*MAXLEAF, 77);
-
 	task_accx[1] = (double*)pmalloc(sizeof(double)*LEN_TASK*MAXLEAF, 75);
 	task_accy[1] = (double*)pmalloc(sizeof(double)*LEN_TASK*MAXLEAF, 76);
 	task_accz[1] = (double*)pmalloc(sizeof(double)*LEN_TASK*MAXLEAF, 77);
 
 
+
 	if(verbosity_gpu) printf(">> \tP2P self interaction collection ...\n");
+	//double prep2p = dtime_p2p_self;
+	//double t2 = dtime();
 	task_prepare_p2p();
-	if(verbosity_gpu) printf(">> \tP2P self interaction collection finished.\n");
-	if(cudaState < 0)
-	{
-		printf("--------a GPU ERROR was occured.\n");
-		return;
-	}
+	//dtime_p2p_collect += (dtime() - t2 - (dtime_p2p_self - prep2p));
 
-	if (p1st != 1) {
-
-		pthread_join(tid, &status);
-
-	}
+	// if (p1st != 1) {
+	// 	pthread_join(tid, &status);
+	// }
 	idxP2P +=idxtask;
+
 	ntask[alt] = idxtask;
-	// argt[0] = alt;
-	// argt[1] = ntask[alt];
+
+	argt[0] = alt;
+	argt[1] = ntask[alt];
+
+	// if(verbosity_gpu) printf(">> \tP2P self interaction computation thread called ...\n");
 	// pthread_create(&tid, NULL, task_compute_p2p, argt);
 	// pthread_join(tid, &status);
+	// if(verbosity_gpu) printf(">> \tP2P self interaction computation thread joined.\n");
 
 	double t0 = dtime();
 	task_prepare_m2l();
@@ -1023,6 +997,7 @@ void fmm_task() {
 	if (0==PROC_RANK) printf(" fmm time = %lf,task_m2l=%lf \n", dtime() - t1,dtime() - t0);
 }
 
+
 void fmm_ext(){
 	int rank, d;
 	int n, mi, mj, mk;
@@ -1057,18 +1032,19 @@ void fmm_ext(){
 
 	t5 = dtime();
 
-	numRemoteCalls = 0;
-	numRemoteInteractions = 0;
-	
     //printf(">> \texecute fmm_remote for %d procecces\n", PROC_SIZE);
     // for (n=1; n<PROC_SIZE; n++) {          // why from n=1 ??
 	// 	fmm_remote(n, shift);
 	// }
+	
+	numQueueFlush = 0;
+	numRemoteInteractions = 0;
+
 	for (n=0; n<PROC_SIZE; n++) {
 		if(verbosity_gpu) 
 		printf(">> \t\texecuting fmm_remote for proc %d \n", n);
-		fmm_remote(n, shift);
-		// if(cudaState < 0)
+		int state = fmm_remote(n, shift);
+		// if(state == -2)
 		// {
 		// 	printf("ERROR : execution faield due to GPU errors.");
 		// 	return;
@@ -1093,8 +1069,8 @@ void fmm_ext(){
 
 				for (n=0; n<PROC_SIZE; n++) {
 					if(verbosity_gpu) printf("execute fmm_remote for periodic shift for proc [%d/%d]\n", n, PROC_SIZE);
-					fmm_remote(n, shift);
-					// if(cudaState < 0)
+					int state = fmm_remote(n, shift);
+					// if(state == -2)
 					// {
 					// 	printf("ERROR : execution faield due to GPU errors.");
 					// 	return;
@@ -1105,10 +1081,12 @@ void fmm_ext(){
 	}
 #endif
 
+
 	//if(verbosity_gpu)
-	// printf("%d number of times remote called.\n", numRemoteCalls);
+	//printf("%d times GPU kernel called\n", numQueueFlush);
 	//if(verbosity_gpu)
 	printf("%d reomte interactions processed\n", numRemoteInteractions);
+
 
 	t7 = dtime();
 

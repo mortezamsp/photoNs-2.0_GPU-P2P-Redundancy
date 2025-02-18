@@ -35,7 +35,8 @@ __global__ void ComputeP2PIndexing(
             double* pos_data, int* leaf_data, int* interaction_data, double* result_data, 
             int ntasks, int posChunk, int leafChunk, int resultChunk,
             double SoftenScale, double MASSPART, int* kernelError,
-            int max_particle_data, int max_leaf_data, int max_interaction_data, int max_result_data);
+            int max_particle_data, int max_leaf_data, int max_interaction_data, int max_result_data,
+            int threadGroup);
 
 #ifdef __cplusplus
 }

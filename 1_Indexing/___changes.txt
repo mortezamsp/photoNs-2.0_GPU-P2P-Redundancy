@@ -7,3 +7,9 @@
 [7] in Makefile:make_demo: i added a parameter with value 1 to let printfs work and details print
 
 
+
+
+
+the max number of particles in leaf is read from input data, which is in initial.c named as MAXLEAF, and in build_kd_tree it is used to stop splitting nodes.
+I also inserted counters for see how many times local p2p and remote p2p executes in each loop. I write them in last two columns of output log too. local calculations is called 1 time a loop and remote is called 27 times each loop (but I am sure it must be 28 because there is one execution before periodic condition calculations).
+

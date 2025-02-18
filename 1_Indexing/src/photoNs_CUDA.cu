@@ -55,12 +55,14 @@ int allocMemGPU(int nleafs, int maxPartsInLeaf, int maxNeighbors, int maxTasks, 
     //announce data size
     long totalSizeGPU = (max_particle_data + max_result_data) * sizeof(double) + 
                         (max_leaf_data + max_interaction_data) * sizeof(int);
-    if(verbosity_gpu) printf(">> \t\tGPU data = %.1lf GB\n", (double)totalSizeGPU/1024.0/1024.0/1024.0);
+    if(verbosity_gpu) 
+        printf(">> \t\tGPU data = %.1lf GB\n", (double)totalSizeGPU/1024.0/1024.0/1024.0);
     
     //allocate position data
     if(d_particle_data == NULL)
     {
-        if(verbosity_gpu) printf(">> \t\treallocating d_pos_data on GPU...");
+        if(verbosity_gpu) 
+            printf(">> \t\treallocating d_pos_data on GPU...");
         e = cudaMalloc((void**)&d_particle_data, max_particle_data * sizeof(double)); 
         if(e != cudaSuccess)
         {
@@ -117,13 +119,13 @@ int allocMemGPU(int nleafs, int maxPartsInLeaf, int maxNeighbors, int maxTasks, 
         }
         if(verbosity_gpu) printf("memory allocated to d_result_data, size = %d ...\n", max_result_data);
     }
-    e = cudaMemset(d_result_data, 0, max_result_data * sizeof(double));
-    if(e != cudaSuccess)
-    {
-        printf("Error memset for d_result_data : ErrorCode = %d, %s\n\t\tsize = %d\n", 
-                                    e, cudaGetErrorString(e), max_result_data);
-        return -1;
-    }
+    // e = cudaMemset(d_result_data, 0, max_result_data * sizeof(double));
+    // if(e != cudaSuccess)
+    // {
+    //     printf("Error memset for d_result_data : ErrorCode = %d, %s\n\t\tsize = %d\n", 
+    //                                 e, cudaGetErrorString(e), max_result_data);
+    //     return -1;
+    // }
 
     return 0;
 }
@@ -203,7 +205,7 @@ extern "C" {
         cudaMalloc((void**)&kernelError, sizeof(int));
         cudaMemset(kernelError, 0, sizeof(int));
         
-        int threadGroup = 100;
+        int threadGroup = 1; //100 is fast
         int newTasks = nTasks/threadGroup;
         dim3 blocks(max(1,min(1024, newTasks + 1)));
         dim3 grids((int)(newTasks / blocks.x) + 1);
@@ -214,7 +216,8 @@ extern "C" {
             d_particle_data, d_leaf_data, d_interaction_data, d_result_data,
             nTasks, posChunk, leafChunk, resultChunk, 
             SoftenScale, MASSPART, kernelError,
-            max_particle_data, max_leaf_data, max_interaction_data, max_result_data);
+            max_particle_data, max_leaf_data, max_interaction_data, max_result_data,
+            threadGroup);
 
         cudaError_t e = cudaDeviceSynchronize();
         if( e!= cudaSuccess)
@@ -248,7 +251,8 @@ __global__ void ComputeP2PIndexing(
     double* pos_data, int* leaf_data, int* interaction_data, double* result_data, 
     int ntasks, int posChunk, int leafChunk, int resultChunk,
     double SoftenScale, double MASSPART, int* kernelError,
-    int max_particle_data, int max_leaf_data, int max_interaction_data, int max_result_data) 
+    int max_particle_data, int max_leaf_data, int max_interaction_data, int max_result_data,
+    int threadGroup) 
 {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     //printf("thread group [%d] enters...\n", tid);
@@ -257,8 +261,8 @@ __global__ void ComputeP2PIndexing(
     //int interactions = 0;
 
     int oldtid = tid;
-    tid = tid * 100;
-    for(int tidGroup = 0; tidGroup < 100; tidGroup++)
+    tid = tid * threadGroup;
+    for(int tidGroup = 0; tidGroup < threadGroup; tidGroup++)
     {
         tid++;        
         if(tid < ntasks)

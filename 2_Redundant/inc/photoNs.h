@@ -22,15 +22,13 @@
 short verbosity_gpu;
 int maxPartsInLeaf;
 int paddingSize;
-int partArraySize;
-int maxNeighbors;
-static int cudaState;// state of cuda executions
+
+double** h_pos_data;
+double** h_acc_data;
+int** h_pos_index;
 
 static int LEN_TASK;
 static int LEN_TASK_remote_cuda;
-
-int num_walkP2P;
-int num_walkP2P_ext;
 //////////////// cuda data //////////////
 
 
@@ -112,8 +110,8 @@ double DTIME_PARTMESH;
 double dtime_p2p_self; //self leaf interactions
 double dtime_p2p; //interactions with E2 neighbors
 double dtime_p2p_collect; //traverse tree but not computation
-double dtime_p2p_update;
-double dtime_p2p_transfer;
+double dtime_p2p_transfer; //transfer data to GPU and results back to RAM
+double dtime_p2p_update; //time to update acc
 double dtime_m2l;
 double dtime_p2p_mirror;
 double dtime_p2p_remote;
@@ -131,10 +129,8 @@ double dtime_task;
 double dtime_ext;
 double dtime_prep_ext;
 
-
-int numRemoteCalls; //number of times remote p2p GPU computation called
-int numRemoteInteractions; //total number of interaction tasksnumRemoteInteractions
-
+int numQueueFlush; //to see number of times that GPU is called in remote p2p computation
+int numRemoteInteractions; //total number of remote tasks
 ///////////////////////////////////////////////
 
 #define MAXSNAP 128

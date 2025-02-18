@@ -96,14 +96,66 @@ void driver(double ai, double af, int snap_idx, int nstep_fix) {
 
 	fmm_construct() ;
 
-	//here gpu arrays are initialized after tree is built
+
 	fmm_prepare();
-	if(cudaState < 0) return;
 
 #ifdef PMTHREAD
 		pthread_t tpm;
 		pthread_create(&tpm, NULL, pm_thread, NULL);
 #endif
+
+	/*
+	// 0...NPART, fist_leaf...last_leaf, first_node...last_node
+	*/
+	int nleafs = last_leaf - first_leaf;
+	int minParts = 0, maxParts = MAXLEAF;
+	if(verbosity_gpu) printf(">> \tleafs :  num leafs = %d, num particles = %ld, [min,avg,max] particle/leaf = [%d,%d,%d]\n",
+			nleafs, NPART_TOTAL, minParts, (int)ceil((double)NPART_TOTAL / nleafs), maxParts);
+	maxPartsInLeaf = maxParts;
+	//int totalPossiblePartsInAllLeafs = maxParts * nleafs;
+
+	//initializing cuda arrays
+	//if(verbosity_gpu) 
+	printf(">> \tdefining arrays...");
+	paddingSize = 2 * maxPartsInLeaf * 3;
+	// int maxNeighbors = 1000;
+	LEN_TASK_remote_cuda = 1000000; //NLEAF * maxNeighbors;// 
+	if(h_pos_data == NULL) 
+	{
+		h_pos_data = (double**)malloc(sizeof(double*) * PROC_SIZE);
+		memset(h_pos_data, 0, PROC_SIZE * sizeof(double*));
+	}
+	if(h_pos_index == NULL)
+	{
+		h_pos_index = (int**)malloc(sizeof(int*) * PROC_SIZE);
+		memset(h_pos_index, 0, PROC_SIZE * sizeof(double*));
+	}
+	if(h_acc_data == NULL) 
+	{
+		h_acc_data = (double**)malloc(sizeof(double*) * PROC_SIZE);
+		memset(h_acc_data, 0, PROC_SIZE * sizeof(double*));
+	}
+	for(int i = 0; i < PROC_SIZE; i++) 
+	{
+		if(h_pos_data[i] == NULL)
+		{ 
+			h_pos_data[i] = (double*)malloc(sizeof(double) * LEN_TASK_remote_cuda * paddingSize);
+			memset(h_pos_data[i], 0, sizeof(double) * LEN_TASK_remote_cuda * paddingSize);
+		}
+		if(h_pos_index[i] == NULL)
+		{
+			h_pos_index[i] = (int*)malloc(sizeof(int) * LEN_TASK_remote_cuda * 5);
+			memset(h_pos_index[i], 0, sizeof(int) * LEN_TASK_remote_cuda * 5);
+		}
+		if(h_acc_data[i] == NULL)
+		{
+			h_acc_data[i] = (double*)malloc(sizeof(double) * LEN_TASK_remote_cuda * maxPartsInLeaf * 3);
+			memset(h_acc_data[i], 0, sizeof(double) * LEN_TASK_remote_cuda * maxPartsInLeaf * 3);
+		}
+	}
+	//if(verbosity_gpu) 
+	printf("...done\n");
+
 
 	if(verbosity_gpu) printf(">> \texecuting fmm_task() \n");
 	fmm_task();
@@ -119,9 +171,8 @@ void driver(double ai, double af, int snap_idx, int nstep_fix) {
 
 #endif
 
-    //computing reomte tree (neighbor interactions)
+	//printf(">> \trunning fmm_ext\n");
 	fmm_ext();
-	if(cudaState < 0) return;
 
 #endif
 
@@ -164,8 +215,7 @@ void driver(double ai, double af, int snap_idx, int nstep_fix) {
 		pack2pack_count = 0;
 		pack2pack_inleaf_count = 0;
 
-		num_walkP2P = 0;
-		num_walkP2P_ext = 0;
+
 
 		for (n=0; n<NPART; n++) {
 			part[n].vel[0] += part[n].acc_pm[0]*dkh;
@@ -242,9 +292,7 @@ void driver(double ai, double af, int snap_idx, int nstep_fix) {
 
 		fmm_construct() ;
 
-		//here gpu arrays are initialized after tree is built
 		fmm_prepare();
-		if(cudaState < 0) return;
 
 
 #ifdef PMTHREAD
@@ -254,7 +302,6 @@ void driver(double ai, double af, int snap_idx, int nstep_fix) {
 		//self-interactions 
 		if(verbosity_gpu) printf(">> \tself interactions begin...\n");
 		fmm_task();
-		if(cudaState < 0) return;
 		if(verbosity_gpu) printf(">> \tself interactions done\n");
 
 
@@ -270,8 +317,8 @@ void driver(double ai, double af, int snap_idx, int nstep_fix) {
 		//if(verbosity_gpu)
 		printf(">> \tneighboring interactions begin...\n");
 		fmm_ext();
-		if(cudaState < 0) return;
-		if(verbosity_gpu) printf(">> \tneighboring interactions done\n");
+		if(verbosity_gpu)
+		printf(">> \tneighboring interactions done\n");
 
 
 #endif

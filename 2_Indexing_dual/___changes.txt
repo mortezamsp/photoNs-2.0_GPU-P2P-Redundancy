@@ -1,4 +1,0 @@
-in fmm.c, remote.c,  LEN_TASK set to 16384, arrays are once collected in fmm.c, 
-in prepare_XXX functions, i only called walk functions
-in fmm_XXX functions, i executed thread once again to make sure that all tasks computed
-
